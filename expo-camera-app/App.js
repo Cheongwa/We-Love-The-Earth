@@ -13,6 +13,8 @@ import {
 } from "react-native";
 
 import { Camera } from "expo-camera";
+
+
 imageReducer = (state, action) => {
   switch (action.type) {
     case "addNewImage":
@@ -22,6 +24,7 @@ imageReducer = (state, action) => {
       return [...state];
   }
 };
+
 export default function App() {
   const [hasPermission, setHasPermission] = useState(null);
   const [isCameramode, setIsCameramode] = useState(false);
