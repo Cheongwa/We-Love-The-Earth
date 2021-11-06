@@ -10,9 +10,12 @@ import {
   Image,
   Dimensions,
   TouchableHighlight,
+  Button,
 } from "react-native";
-
 import { Camera } from "expo-camera";
+import * as MediaLibrary from "expo-media-library";
+import * as Linking from "expo-linking";
+
 imageReducer = (state, action) => {
   switch (action.type) {
     case "addNewImage":
@@ -20,20 +23,40 @@ imageReducer = (state, action) => {
     case "changeSelection":
       action.payload.item.selected = action.payload.selected;
       return [...state];
+    case "saveSelected":
+      state
+        .filter((item) => item.selected && !item.saved)
+        .forEach((item) => {
+          const result = MediaLibrary.createAssetAsync(item.photo.uri);
+          console.log(result);
+          result.then((asset) => {
+            console.log(asset.uri);
+            item.photo.uri = asset.uri;
+            console.log(item.photo);
+            item.saved = true;
+          });
+        });
+      state.map((item) => {
+        if (item.selected) item.selected = false;
+      });
+      return [...state];
   }
 };
 export default function App() {
   const [hasPermission, setHasPermission] = useState(null);
   const [isCameramode, setIsCameramode] = useState(false);
+  const [status, requestPermission] = MediaLibrary.usePermissions();
   const [type, setType] = useState(Camera.Constants.Type.back);
   const [state, dispatch] = useReducer(imageReducer, []);
   const cameraRef = useRef(null);
 
   useEffect(() => {
     (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === "granted");
-      console.log(status);
+      const cameraStatus = await Camera.requestCameraPermissionsAsync();
+      setHasPermission(cameraStatus.status === "granted");
+      console.log(cameraStatus.status);
+      const microphoneStatus = await Camera.requestMicrophonePermissionsAsync();
+      console.log(microphoneStatus);
     })();
   }, []);
   if (hasPermission === null) {
@@ -72,7 +95,7 @@ export default function App() {
                     let photo = await cameraRef.current.takePictureAsync();
                     dispatch({
                       type: "addNewImage",
-                      payload: { selected: true, photo: photo },
+                      payload: { selected: true, saved: false, photo: photo },
                     });
                     console.log(photo);
                     console.log(state.length);
@@ -127,48 +150,71 @@ export default function App() {
             </Text>
           </TouchableOpacity>
           {state.length > 0 ? (
-            <FlatList
-              contentContainerStyle={{
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-              }}
-              width={Dimensions.get("screen").width}
-              data={state}
-              horizontal={false}
-              numColumns={3}
-              keyExtractor={(photo) => photo.photo.uri}
-              renderItem={({ item }) => {
-                return (
-                  <TouchableHighlight
-                    onPress={() => {
-                      console.log(item.selected);
-                      dispatch({
-                        type: "changeSelection",
-                        payload: {
-                          item: item,
-                          selected: !item.selected,
-                        },
-                      });
-                      console.log(item.selected);
-                    }}
-                    style={
-                      item.selected
-                        ? styles.selectedImage
-                        : styles.unselectedImage
-                    }
-                  >
-                    <Image
-                      style={{
-                        height: Dimensions.get("screen").width * 0.3,
-                        width: Dimensions.get("screen").width * 0.3,
-                        margin: 3,
+            <>
+              <FlatList
+                contentContainerStyle={{
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                }}
+                width={Dimensions.get("screen").width}
+                data={state}
+                horizontal={false}
+                numColumns={3}
+                keyExtractor={(photo) => photo.photo.uri}
+                renderItem={({ item }) => {
+                  return (
+                    <TouchableHighlight
+                      onPress={() => {
+                        console.log(item.selected);
+                        dispatch({
+                          type: "changeSelection",
+                          payload: {
+                            item: item,
+                            selected: !item.selected,
+                          },
+                        });
+                        console.log(item.selected);
                       }}
-                      source={{ uri: item.photo.uri }}
-                    ></Image>
-                  </TouchableHighlight>
-                );
-              }}
-            />
+                      style={
+                        item.selected
+                          ? styles.selectedImage
+                          : styles.unselectedImage
+                      }
+                    >
+                      <Image
+                        style={{
+                          height: Dimensions.get("screen").width * 0.3,
+                          width: Dimensions.get("screen").width * 0.3,
+                          margin: 3,
+                        }}
+                        source={{ uri: item.photo.uri }}
+                      ></Image>
+                    </TouchableHighlight>
+                  );
+                }}
+              />
+              <Button
+                title="Save Selected"
+                style={{ marginBottom: 10 }}
+                onPress={async () => {
+                  const perm = await MediaLibrary.requestPermissionsAsync();
+                  console.log(perm);
+                  if (perm.granted) {
+                    dispatch({ type: "saveSelected" });
+                  }
+                }}
+              ></Button>
+              <Button
+                title="Export to Instagram"
+                onPress={() => {
+                  dispatch({ type: "saveSelected" });
+                  let encodedURL = encodeURIComponent(state[0].photo.uri);
+                  console.log(encodedURL);
+                  let instagramURL = `instagram://library?AssetPath=${encodedURL}`;
+                  Linking.openURL(instagramURL);
+                }}
+              />
+            </>
           ) : null}
         </SafeAreaView>
       )}
