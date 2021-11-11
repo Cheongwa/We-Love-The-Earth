@@ -13,6 +13,7 @@ import {
   Button,
 } from "react-native";
 import { Camera } from "expo-camera";
+import { Video, playbackObject } from "expo-av";
 import * as MediaLibrary from "expo-media-library";
 import * as Linking from "expo-linking";
 
@@ -22,34 +23,35 @@ imageReducer = (state, action) => {
       return [...state, action.payload];
     case "changeSelection":
       action.payload.item.selected = action.payload.selected;
+      action.payload.item.paused =
+        action.payload.item.type === "video" ? action.payload.selected : false;
+      console.log(action.payload.item);
       return [...state];
     case "saveSelected":
-      state
-        .filter((item) => item.selected && !item.saved)
-        .forEach((item) => {
-          const result = MediaLibrary.createAssetAsync(item.photo.uri);
-          console.log(result);
-          result.then((asset) => {
-            console.log(asset.uri);
-            item.photo.uri = asset.uri;
-            console.log(item.photo);
-            item.saved = true;
-          });
-        });
-      state.map((item) => {
-        if (item.selected) item.selected = false;
-      });
+      saveImages(state.filter((item) => item.selected && !item.saved));
       return [...state];
+  }
+};
+saveImages = async (itemList) => {
+  console.log(itemList);
+  for (item of itemList) {
+    console.log(item);
+    if (item.saved) continue;
+    const result = await MediaLibrary.createAssetAsync(item.photo.uri);
+    console.log(result);
+    item.photo.uri = result.uri;
+    item.saved = true;
   }
 };
 export default function App() {
   const [hasPermission, setHasPermission] = useState(null);
   const [isCameramode, setIsCameramode] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isRecordmode, setIsRecordmode] = useState(false);
   const [status, requestPermission] = MediaLibrary.usePermissions();
   const [type, setType] = useState(Camera.Constants.Type.back);
   const [state, dispatch] = useReducer(imageReducer, []);
   const cameraRef = useRef(null);
-
   useEffect(() => {
     (async () => {
       const cameraStatus = await Camera.requestCameraPermissionsAsync();
@@ -73,7 +75,12 @@ export default function App() {
   return (
     <View style={styles.container}>
       {isCameramode ? (
-        <Camera style={styles.camera} type={type} ref={cameraRef}>
+        <Camera
+          style={styles.camera}
+          type={type}
+          ref={cameraRef}
+          onCameraReady={() => setIsCameraReady(true)}
+        >
           <View style={styles.buttonContainer}>
             <TouchableOpacity
               style={styles.button_left}
@@ -91,11 +98,16 @@ export default function App() {
             <TouchableOpacity
               onPress={async () => {
                 try {
-                  if (cameraRef) {
+                  if (cameraRef && cameraRef.current && isCameraReady) {
                     let photo = await cameraRef.current.takePictureAsync();
                     dispatch({
                       type: "addNewImage",
-                      payload: { selected: true, saved: false, photo: photo },
+                      payload: {
+                        selected: true,
+                        type: "photo",
+                        paused: true,
+                        photo: photo,
+                      },
                     });
                     console.log(photo);
                     console.log(state.length);
@@ -105,6 +117,40 @@ export default function App() {
                 }
               }}
               style={styles.button_middle}
+            />
+            <TouchableOpacity
+              onPress={async () => {
+                try {
+                  if (cameraRef && cameraRef.current && isCameraReady) {
+                    if (!isRecordmode) {
+                      setIsRecordmode(true);
+                      let item = await cameraRef.current.recordAsync();
+                      dispatch({
+                        type: "addNewImage",
+                        payload: {
+                          selected: true,
+                          type: "video",
+                          paused: true,
+                          photo: item,
+                        },
+                      });
+                      console.log(item);
+                      console.log(state.length);
+                    } else {
+                      setIsRecordmode(false);
+                      cameraRef.current.stopRecording();
+                      console.log("record stop");
+                    }
+                  }
+                } catch (e) {
+                  console.log(e);
+                }
+              }}
+              style={
+                isRecordmode
+                  ? styles.button_middle_record
+                  : styles.button_middle
+              }
             />
             <TouchableOpacity
               style={styles.button_right}
@@ -181,14 +227,28 @@ export default function App() {
                           : styles.unselectedImage
                       }
                     >
-                      <Image
-                        style={{
-                          height: Dimensions.get("screen").width * 0.3,
-                          width: Dimensions.get("screen").width * 0.3,
-                          margin: 3,
-                        }}
-                        source={{ uri: item.photo.uri }}
-                      ></Image>
+                      {item.type === "video" ? (
+                        <Video
+                          style={{
+                            height: Dimensions.get("screen").width * 0.3,
+                            width: Dimensions.get("screen").width * 0.3,
+                            margin: 3,
+                          }}
+                          source={{ uri: item.photo.uri }}
+                          shouldPlay={true}
+                          isLooping={true}
+                          isMuted={true}
+                        ></Video>
+                      ) : (
+                        <Image
+                          style={{
+                            height: Dimensions.get("screen").width * 0.3,
+                            width: Dimensions.get("screen").width * 0.3,
+                            margin: 3,
+                          }}
+                          source={{ uri: item.photo.uri }}
+                        ></Image>
+                      )}
                     </TouchableHighlight>
                   );
                 }}
@@ -200,14 +260,14 @@ export default function App() {
                   const perm = await MediaLibrary.requestPermissionsAsync();
                   console.log(perm);
                   if (perm.granted) {
-                    dispatch({ type: "saveSelected" });
+                    await dispatch({ type: "saveSelected" });
                   }
                 }}
               ></Button>
               <Button
                 title="Export to Instagram"
-                onPress={() => {
-                  dispatch({ type: "saveSelected" });
+                onPress={async () => {
+                  await saveImages(state);
                   let encodedURL = encodeURIComponent(state[0].photo.uri);
                   console.log(encodedURL);
                   let instagramURL = `instagram://library?AssetPath=${encodedURL}`;
@@ -252,6 +312,13 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     paddingBottom: 10,
     backgroundColor: "white",
+  },
+  button_middle_record: {
+    height: 50,
+    width: 50,
+    borderRadius: 50,
+    paddingBottom: 10,
+    backgroundColor: "red",
   },
   button_right: {
     paddingTop: 10,
